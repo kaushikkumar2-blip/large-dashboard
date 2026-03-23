@@ -201,7 +201,7 @@ def load_client_map(path: str) -> dict:
         pass
     return mapping
 
-CLIENT_MAP = load_client_map(r"C:\Users\kaushik.kumar2\Desktop\large dashbaord\Large Clients.csv")
+CLIENT_MAP = load_client_map(r"Large Clients.csv")
 
 
 def _resolve_client(seller_str):
