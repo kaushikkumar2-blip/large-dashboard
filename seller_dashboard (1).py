@@ -1602,7 +1602,7 @@ elif page == "🎯 Threshold Performance":
 #  PAGE 4 — PICKUP PERFORMANCE
 # ═════════════════════════════════════════════════════════════════════════════
 elif page == "📦 Pickup Performance":
-    _PICKUP_CSV = r"C:\Users\kaushik.kumar2\Desktop\large dashbaord\4233c423f8bf6d44304a18a2cb994306.csv"
+    _PICKUP_CSV = r"4233c423f8bf6d44304a18a2cb994306.csv"
     try:
         pickup_raw = load_pickup(_PICKUP_CSV)
     except FileNotFoundError:
