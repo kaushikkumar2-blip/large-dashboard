@@ -201,7 +201,7 @@ def load_client_map(path: str) -> dict:
         pass
     return mapping
 
-CLIENT_MAP = load_client_map(r"Large Clients.csv")
+CLIENT_MAP = load_client_map(r"C:\Users\kaushik.kumar2\Desktop\large dashbaord\Large Clients.csv")
 
 
 def _resolve_client(seller_str):
@@ -260,6 +260,10 @@ def _recompute_pcts(df):
         df["Prepaid Conversion %"] = (df["pp_conv"] / df["pp_vol"].replace(0, NAN) * 100).round(2)
     if "fm_picked" in df.columns and "fm_created" in df.columns:
         df["FM Picked %"] = (df["fm_picked"] / df["fm_created"].replace(0, NAN) * 100).round(2)
+    if "DHin" in df.columns:
+        df["D0 Delivered"] = df["DHin"].fillna(0).astype(int)
+    if "D0_OFD" in df.columns:
+        df["D0+ Delivered"] = df["D0_OFD"].fillna(0).astype(int)
     return df.fillna(0)
 
 
@@ -268,6 +272,7 @@ _RAW_SUM_COLS = [
     "Breach_Num", "Breach_Den", "zero_attempt_num",
     "cod_vol", "cod_conv", "pp_vol", "pp_conv",
     "fm_picked", "fm_created",
+    "DHin", "D0_OFD",
 ]
 
 
@@ -341,6 +346,17 @@ def load_raw(path: str) -> pd.DataFrame:
     return df
 
 
+@st.cache_data(ttl=120)
+def load_pickup(path: str) -> pd.DataFrame:
+    df = pd.read_csv(path)
+    df["reporting_date"] = df["reporting_date"].astype(str)
+    df["seller_type"] = df["seller_type"].astype(str)
+    for c in ["total_created", "total_picked", "day0_picked", "day1_picked", "day2plus_picked"]:
+        if c in df.columns:
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0)
+    return df
+
+
 def safe_div(num, den, scale=100):
     return (num / den * scale) if den else 0
 
@@ -350,7 +366,7 @@ def calculate_summary_metrics(df: pd.DataFrame) -> dict:
         return {}
     _sum_cols = ["PHin", "conv_num", "First_attempt_delivered", "fac_deno",
                  "Breach_Num", "Breach_Den", "zero_attempt_num",
-                 "fm_picked", "fm_created"]
+                 "fm_picked", "fm_created", "DHin", "D0_OFD"]
     _available = [c for c in _sum_cols if c in df.columns]
     _totals = df[_available].sum()
     tv  = _totals.get("PHin", 0)
@@ -362,6 +378,8 @@ def calculate_summary_metrics(df: pd.DataFrame) -> dict:
     zn  = _totals.get("zero_attempt_num", 0)
     fmp = _totals.get("fm_picked", 0)
     fmc = _totals.get("fm_created", 0)
+    d0  = _totals.get("DHin", 0)
+    d0p = _totals.get("D0_OFD", 0)
     _is_cod = df["payment_type_norm"] == "COD"
     _is_pp  = df["payment_type_norm"] == "Prepaid"
     cv  = df.loc[_is_cod, "PHin"].sum()
@@ -382,6 +400,8 @@ def calculate_summary_metrics(df: pd.DataFrame) -> dict:
         "Breach %":             safe_div(bn, bd),
         "ZRTO %":               safe_div(zn, tv),
         "FM Picked %":          safe_div(fmp, fmc),
+        "D0 Delivered":         int(d0),
+        "D0+ Delivered":        int(d0p),
     }
 
 
@@ -397,6 +417,8 @@ def build_seller_table(df: pd.DataFrame) -> pd.DataFrame:
         zero_attempt_num=("zero_attempt_num", "sum"),
         fm_picked=("fm_picked", "sum"),
         fm_created=("fm_created", "sum"),
+        DHin=("DHin", "sum"),
+        D0_OFD=("D0_OFD", "sum"),
     ).reset_index()
 
     cod = (
@@ -428,6 +450,8 @@ def build_seller_table(df: pd.DataFrame) -> pd.DataFrame:
     r["COD Share %"]          = (r["cod_vol"]                / r["PHin"].replace(0, NAN) * 100).round(2)
     r["Prepaid Share %"]      = (r["pp_vol"]                 / r["PHin"].replace(0, NAN) * 100).round(2)
     r["FM Picked %"]          = (r["fm_picked"]              / r["fm_created"].replace(0, NAN) * 100).round(2)
+    r["D0 Delivered"]         = r["DHin"].fillna(0).astype(int)
+    r["D0+ Delivered"]        = r["D0_OFD"].fillna(0).astype(int)
 
     return r.fillna(0).sort_values("PHin", ascending=False)
 
@@ -444,6 +468,8 @@ def build_daily_table(df: pd.DataFrame) -> pd.DataFrame:
         Breach_Den=("Breach_Den", "sum"),
         fm_picked=("fm_picked", "sum"),
         fm_created=("fm_created", "sum"),
+        DHin=("DHin", "sum"),
+        D0_OFD=("D0_OFD", "sum"),
     ).reset_index()
 
     daily["ZRTO %"]      = (daily["zero_attempt_num"]        / daily["PHin"].replace(0, NAN) * 100).round(2)
@@ -451,6 +477,8 @@ def build_daily_table(df: pd.DataFrame) -> pd.DataFrame:
     daily["Breach %"]    = (daily["Breach_Num"]              / daily["Breach_Den"].replace(0, NAN) * 100).round(2)
     daily["Conv %"]      = (daily["conv_num"]                / daily["PHin"].replace(0, NAN) * 100).round(2)
     daily["FM Picked %"] = (daily["fm_picked"]               / daily["fm_created"].replace(0, NAN) * 100).round(2)
+    daily["D0 Delivered"]  = daily["DHin"].fillna(0).astype(int)
+    daily["D0+ Delivered"] = daily["D0_OFD"].fillna(0).astype(int)
 
     return daily.fillna(0).sort_values("reporting_date")
 
@@ -462,6 +490,7 @@ _AGG_SPEC = dict(
     fac_deno=("fac_deno", "sum"), Breach_Num=("Breach_Num", "sum"),
     Breach_Den=("Breach_Den", "sum"),
     fm_picked=("fm_picked", "sum"), fm_created=("fm_created", "sum"),
+    DHin=("DHin", "sum"), D0_OFD=("D0_OFD", "sum"),
 )
 
 
@@ -478,6 +507,8 @@ def _aggregate_by_period(daily_df: pd.DataFrame, period_type: str) -> pd.DataFra
     agg["Breach %"]     = (agg["Breach_Num"]              / agg["Breach_Den"].replace(0, NAN) * 100).round(2)
     agg["Conv %"]       = (agg["conv_num"]                / phin * 100).round(2)
     agg["FM Picked %"]  = (agg["fm_picked"]               / agg["fm_created"].replace(0, NAN) * 100).round(2)
+    agg["D0 Delivered"]  = agg["DHin"].fillna(0).astype(int)
+    agg["D0+ Delivered"] = agg["D0_OFD"].fillna(0).astype(int)
     return agg.fillna(0)
 
 
@@ -609,7 +640,7 @@ def _get_thresh(metric: str) -> float:
 # ─────────────────────────────────────────────────────────────────────────────
 page = st.radio(
     "Page",
-    ["📊 Overall Metric", "📈 Daily Trends", "🎯 Threshold Performance"],
+    ["📊 Overall Metric", "📈 Daily Trends", "🎯 Threshold Performance", "📦 Pickup Performance"],
     horizontal=True,
     label_visibility="collapsed",
 )
@@ -655,7 +686,7 @@ if page == "📊 Overall Metric":
     )
 
     # ── Compact KPI Row ───────────────────────────────────────────────────────
-    kpi_cols = st.columns(6)
+    kpi_cols = st.columns(8)
     kpis = [
         ("Total Volume", f"{int(overall.get('Volume', 0)):,}", "PHin", ""),
         ("Breach %",     f"{overall.get('Breach %', 0):.1f}%", "SLA breach rate", "red"),
@@ -663,6 +694,8 @@ if page == "📊 Overall Metric":
         ("FAC %",        f"{overall.get('FAC %', 0):.1f}%",   "1st attempt", "orange"),
         ("Conv %",       f"{overall.get('Overall Conversion %', 0):.1f}%", "Conversion", "green"),
         ("FM Picked %",  f"{overall.get('FM Picked %', 0):.1f}%", "Picked / Created", "purple"),
+        ("D0 Delivered", f"{int(overall.get('D0 Delivered', 0)):,}", "Same-day delivery", "green"),
+        ("D0+ Delivered", f"{int(overall.get('D0+ Delivered', 0)):,}", "D0+ delivery", "green"),
     ]
     for col, (label, val, sub, cls) in zip(kpi_cols, kpis):
         with col:
@@ -693,8 +726,9 @@ if page == "📊 Overall Metric":
         "Breach %", "FAC %", "ZRTO %", "FM Picked %",
         "Overall Conversion %", "COD Conversion %", "Prepaid Conversion %",
         "COD Share %", "Prepaid Share %",
+        "D0 Delivered", "D0+ Delivered",
     ]
-    breach_report = seller_table[breach_report_cols].rename(columns={
+    breach_report = seller_table[[c for c in breach_report_cols if c in seller_table.columns]].rename(columns={
         "seller_type": "Seller",
         "PHin": "Volume",
     })
@@ -724,6 +758,8 @@ if page == "📊 Overall Metric":
             "Prepaid Conversion %": "{:.1f}%",
             "COD Share %": "{:.1f}%",
             "Prepaid Share %": "{:.1f}%",
+            "D0 Delivered": "{:,.0f}",
+            "D0+ Delivered": "{:,.0f}",
         })
     )
     st.dataframe(styled_breach, use_container_width=True, height=420, hide_index=True)
@@ -803,6 +839,8 @@ if page == "📊 Overall Metric":
                 zero_attempt_num=("zero_attempt_num", "sum"),
                 fm_picked=("fm_picked", "sum"),
                 fm_created=("fm_created", "sum"),
+                DHin=("DHin", "sum"),
+                D0_OFD=("D0_OFD", "sum"),
             ).reset_index()
 
             cod_daily = (
@@ -836,17 +874,21 @@ if page == "📊 Overall Metric":
             d_r["COD Share %"]          = (d_r["cod_vol"] / d_r["PHin"].replace(0, NAN) * 100).round(2)
             d_r["Prepaid Share %"]      = (d_r["pp_vol"]  / d_r["PHin"].replace(0, NAN) * 100).round(2)
             d_r["FM Picked %"]          = (d_r["fm_picked"] / d_r["fm_created"].replace(0, NAN) * 100).round(2)
+            d_r["D0 Delivered"]         = d_r["DHin"].fillna(0).astype(int)
+            d_r["D0+ Delivered"]        = d_r["D0_OFD"].fillna(0).astype(int)
             d_r = d_r.fillna(0)
 
             d_r = d_r[d_r["PHin"] >= min_vol]
             d_r["Date"] = d_r["reporting_date"].str[4:6] + "/" + d_r["reporting_date"].str[6:8]
 
-            daily_breach_display = d_r[[
+            _dw_display_cols = [
                 "Date", "seller_type", "Breach %", "FAC %",
                 "PHin", "ZRTO %", "FM Picked %",
                 "Overall Conversion %", "COD Conversion %", "Prepaid Conversion %",
                 "COD Share %", "Prepaid Share %",
-            ]].rename(columns={
+                "D0 Delivered", "D0+ Delivered",
+            ]
+            daily_breach_display = d_r[[c for c in _dw_display_cols if c in d_r.columns]].rename(columns={
                 "seller_type": "Seller",
                 "PHin": "Volume",
             }).sort_values(["Date", "Seller"])
@@ -879,6 +921,8 @@ if page == "📊 Overall Metric":
                     "Prepaid Conversion %": "{:.1f}%",
                     "COD Share %": "{:.1f}%",
                     "Prepaid Share %": "{:.1f}%",
+                    "D0 Delivered": "{:,.0f}",
+                    "D0+ Delivered": "{:,.0f}",
                 })
             )
             st.dataframe(styled_daily_breach, use_container_width=True, height=500, hide_index=True)
@@ -1316,7 +1360,7 @@ elif page == "📈 Daily Trends":
 # ═════════════════════════════════════════════════════════════════════════════
 #  PAGE 3 — THRESHOLD PERFORMANCE
 # ═════════════════════════════════════════════════════════════════════════════
-else:
+elif page == "🎯 Threshold Performance":
     daily_df_tp = merge_daily_by_client(build_daily_table(filtered_df))
     dates_tp = sorted(daily_df_tp["reporting_date"].unique())
     sellers_tp = sorted(daily_df_tp["seller_type"].unique())
@@ -1552,6 +1596,270 @@ else:
             .format({"Value": _tp_fmt, "Threshold": _tp_fmt, "Gap": _tp_fmt})
         )
         st.dataframe(styled_tp, use_container_width=True, height=450, hide_index=True)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+#  PAGE 4 — PICKUP PERFORMANCE
+# ═════════════════════════════════════════════════════════════════════════════
+elif page == "📦 Pickup Performance":
+    _PICKUP_CSV = r"C:\Users\kaushik.kumar2\Desktop\large dashbaord\4233c423f8bf6d44304a18a2cb994306.csv"
+    try:
+        pickup_raw = load_pickup(_PICKUP_CSV)
+    except FileNotFoundError:
+        st.error(f"Pickup data file not found: `{_PICKUP_CSV}`")
+        st.stop()
+
+    st.markdown("### 📦 Pickup Performance — Client-wise D0 / D1 / D2+ %")
+    st.caption(
+        "Shows what percentage of created shipments were picked up on D0, D1, and D2+ for each client. "
+        "Use the date filter to narrow the range."
+    )
+
+    _pk_all_dates = sorted(pickup_raw["reporting_date"].unique())
+    try:
+        _pk_min_d = datetime.strptime(min(_pk_all_dates), "%Y%m%d").date()
+        _pk_max_d = datetime.strptime(max(_pk_all_dates), "%Y%m%d").date()
+    except (ValueError, TypeError):
+        _pk_min_d = _pk_max_d = datetime.now().date()
+
+    _pk_dc1, _pk_dc2 = st.columns(2)
+    with _pk_dc1:
+        pk_start = st.date_input("From", value=_pk_min_d, min_value=_pk_min_d, max_value=_pk_max_d, key="pk_from")
+    with _pk_dc2:
+        pk_end = st.date_input("To", value=_pk_max_d, min_value=_pk_min_d, max_value=_pk_max_d, key="pk_to")
+    if pk_start > pk_end:
+        pk_start, pk_end = pk_end, pk_start
+
+    pk_start_str = pk_start.strftime("%Y%m%d")
+    pk_end_str = pk_end.strftime("%Y%m%d")
+    pk_df = pickup_raw[
+        (pickup_raw["reporting_date"] >= pk_start_str)
+        & (pickup_raw["reporting_date"] <= pk_end_str)
+    ]
+
+    if pk_df.empty:
+        st.warning("No pickup data for the selected date range.")
+    else:
+        pk_df = pk_df.copy()
+        pk_df["Client"] = pk_df["seller_type"].map(_resolve_client_cached)
+        pk_df.loc[pk_df["Client"] == "—", "Client"] = pk_df.loc[pk_df["Client"] == "—", "seller_type"]
+
+        pk_codes = (
+            pk_df.groupby("Client")["seller_type"]
+            .apply(lambda x: ", ".join(sorted(x.unique())))
+            .reset_index()
+            .rename(columns={"seller_type": "Seller Code"})
+        )
+        pk_agg = pk_df.groupby("Client").agg(
+            total_created=("total_created", "sum"),
+            total_picked=("total_picked", "sum"),
+            day0_picked=("day0_picked", "sum"),
+            day1_picked=("day1_picked", "sum"),
+            day2plus_picked=("day2plus_picked", "sum"),
+        ).reset_index()
+        pk_agg = pk_agg.merge(pk_codes, on="Client", how="left")
+
+        pk_created = pk_agg["total_created"].replace(0, NAN)
+        pk_agg["D0 %"] = (pk_agg["day0_picked"] / pk_created * 100).round(2)
+        pk_agg["D1 %"] = (pk_agg["day1_picked"] / pk_created * 100).round(2)
+        pk_agg["D2+ %"] = (pk_agg["day2plus_picked"] / pk_created * 100).round(2)
+        pk_agg["Pickup %"] = (pk_agg["total_picked"] / pk_created * 100).round(2)
+        pk_agg = pk_agg.fillna(0).sort_values("total_created", ascending=False)
+
+        pk_kc1, pk_kc2, pk_kc3, pk_kc4, pk_kc5 = st.columns(5)
+        _pk_totals = pk_agg[["total_created", "total_picked", "day0_picked", "day1_picked", "day2plus_picked"]].sum()
+        _pk_tc = _pk_totals["total_created"]
+        _pk_tp = _pk_totals["total_picked"]
+        _pk_d0 = _pk_totals["day0_picked"]
+        _pk_d1 = _pk_totals["day1_picked"]
+        _pk_d2 = _pk_totals["day2plus_picked"]
+        with pk_kc1:
+            st.markdown(
+                f'<div class="kpi-card">'
+                f'<div class="kpi-label">Total Created</div>'
+                f'<div class="kpi-value">{int(_pk_tc):,}</div>'
+                f'<div class="kpi-sub">Shipments created</div></div>',
+                unsafe_allow_html=True,
+            )
+        with pk_kc2:
+            st.markdown(
+                f'<div class="kpi-card green">'
+                f'<div class="kpi-label">Overall Pickup %</div>'
+                f'<div class="kpi-value">{safe_div(_pk_tp, _pk_tc):.1f}%</div>'
+                f'<div class="kpi-sub">Picked / Created</div></div>',
+                unsafe_allow_html=True,
+            )
+        with pk_kc3:
+            st.markdown(
+                f'<div class="kpi-card green">'
+                f'<div class="kpi-label">D0 %</div>'
+                f'<div class="kpi-value">{safe_div(_pk_d0, _pk_tc):.1f}%</div>'
+                f'<div class="kpi-sub">Same-day pickup</div></div>',
+                unsafe_allow_html=True,
+            )
+        with pk_kc4:
+            st.markdown(
+                f'<div class="kpi-card orange">'
+                f'<div class="kpi-label">D1 %</div>'
+                f'<div class="kpi-value">{safe_div(_pk_d1, _pk_tc):.1f}%</div>'
+                f'<div class="kpi-sub">Next-day pickup</div></div>',
+                unsafe_allow_html=True,
+            )
+        with pk_kc5:
+            st.markdown(
+                f'<div class="kpi-card red">'
+                f'<div class="kpi-label">D2+ %</div>'
+                f'<div class="kpi-value">{safe_div(_pk_d2, _pk_tc):.1f}%</div>'
+                f'<div class="kpi-sub">Delayed pickup</div></div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown("#### Client-wise Pickup Breakdown")
+
+        pk_search = st.text_input(
+            "Search client", placeholder="🔍 Search client…",
+            label_visibility="collapsed", key="pk_search",
+        )
+
+        pk_display = pk_agg[[
+            "Client", "Seller Code", "total_created", "total_picked",
+            "D0 %", "D1 %", "D2+ %", "Pickup %",
+        ]].rename(columns={
+            "total_created": "Created",
+            "total_picked": "Picked",
+        })
+
+        if pk_search:
+            _pk_mask = (
+                pk_display["Client"].str.upper().str.contains(pk_search.upper())
+                | pk_display["Seller Code"].str.upper().str.contains(pk_search.upper())
+            )
+            pk_display = pk_display[_pk_mask]
+
+        def _pk_color_d0(s):
+            return np.select(
+                [s >= 80, s >= 60],
+                ["background-color:#DCFCE7;color:#166534;font-weight:600;",
+                 "background-color:#FEF9C3;color:#854D0E;font-weight:600;"],
+                default="background-color:#FEE2E2;color:#991B1B;font-weight:600;",
+            ).tolist()
+
+        def _pk_color_d2(s):
+            return np.select(
+                [s <= 5, s <= 15],
+                ["background-color:#DCFCE7;color:#166534;font-weight:600;",
+                 "background-color:#FEF9C3;color:#854D0E;font-weight:600;"],
+                default="background-color:#FEE2E2;color:#991B1B;font-weight:600;",
+            ).tolist()
+
+        styled_pk = (
+            pk_display.style
+            .apply(_pk_color_d0, subset=["D0 %", "Pickup %"])
+            .apply(_pk_color_d2, subset=["D2+ %"])
+            .apply(_color_volume_vec, subset=["Created"])
+            .format({
+                "Created": "{:,.0f}",
+                "Picked": "{:,.0f}",
+                "D0 %": "{:.1f}%",
+                "D1 %": "{:.1f}%",
+                "D2+ %": "{:.1f}%",
+                "Pickup %": "{:.1f}%",
+            })
+        )
+        st.dataframe(styled_pk, use_container_width=True, height=500, hide_index=True)
+
+        st.divider()
+        st.markdown("#### 📅 Pickup Trend")
+
+        _pkt_all_clients = sorted(pk_df["Client"].unique())
+        _pkt_seller_by_client = (
+            pk_df.groupby("Client")["seller_type"]
+            .apply(lambda x: ", ".join(sorted(x.unique())))
+            .to_dict()
+        )
+        _pkt_options = [
+            f"{c}  ({_pkt_seller_by_client.get(c, '')})" if _pkt_seller_by_client.get(c) else c
+            for c in _pkt_all_clients
+        ]
+        _pkt_opt_to_client = dict(zip(_pkt_options, _pkt_all_clients))
+
+        _pkt_fc1, _pkt_fc2 = st.columns([1, 3])
+        with _pkt_fc1:
+            pk_period_mode = st.radio(
+                "Period", ["Day", "Week", "Month"], horizontal=True, key="pk_period_mode",
+            )
+        with _pkt_fc2:
+            _pkt_selected_opts = st.multiselect(
+                "Select clients / sellers",
+                options=_pkt_options,
+                default=[],
+                key="pk_trend_seller",
+                placeholder="All clients (choose to filter)…",
+            )
+        _pkt_selected_clients = [_pkt_opt_to_client[o] for o in _pkt_selected_opts]
+
+        pk_trend_src = pk_df.copy()
+        if _pkt_selected_clients:
+            pk_trend_src = pk_trend_src[pk_trend_src["Client"].isin(_pkt_selected_clients)]
+
+        if pk_trend_src.empty:
+            st.info("No data for the selected filters.")
+        else:
+            _pk_sum_cols = ["total_created", "day0_picked", "day1_picked", "day2plus_picked"]
+
+            if pk_period_mode == "Day":
+                pk_trend_src["_period"] = pk_trend_src["reporting_date"]
+            elif pk_period_mode == "Week":
+                _pk_dt = pd.to_datetime(pk_trend_src["reporting_date"], format="%Y%m%d", errors="coerce")
+                pk_trend_src["_period"] = _pk_dt.dt.strftime("%Y-W%W")
+            else:
+                _pk_dt = pd.to_datetime(pk_trend_src["reporting_date"], format="%Y%m%d", errors="coerce")
+                pk_trend_src["_period"] = _pk_dt.dt.strftime("%Y-%m")
+
+            pk_trend_codes = (
+                pk_trend_src.groupby(["_period", "Client"])["seller_type"]
+                .apply(lambda x: ", ".join(sorted(x.unique())))
+                .reset_index()
+                .rename(columns={"seller_type": "Seller Code"})
+            )
+
+            pk_trend_agg = (
+                pk_trend_src.groupby(["_period", "Client"])[_pk_sum_cols]
+                .sum()
+                .reset_index()
+            )
+            pk_trend_agg = pk_trend_agg.merge(pk_trend_codes, on=["_period", "Client"], how="left")
+
+            _pk_t_created = pk_trend_agg["total_created"].replace(0, NAN)
+            pk_trend_agg["D0 %"] = (pk_trend_agg["day0_picked"] / _pk_t_created * 100).round(2)
+            pk_trend_agg["D1 %"] = (pk_trend_agg["day1_picked"] / _pk_t_created * 100).round(2)
+            pk_trend_agg["D2+ %"] = (pk_trend_agg["day2plus_picked"] / _pk_t_created * 100).round(2)
+            pk_trend_agg = pk_trend_agg.fillna(0).sort_values(["_period", "Client"])
+
+            if pk_period_mode == "Day":
+                pk_trend_agg["Period"] = pk_trend_agg["_period"].str[4:6] + "/" + pk_trend_agg["_period"].str[6:8]
+            else:
+                pk_trend_agg["Period"] = pk_trend_agg["_period"]
+
+            pk_trend_display = pk_trend_agg[[
+                "Period", "Client", "Seller Code", "total_created",
+                "D0 %", "D1 %", "D2+ %",
+            ]].rename(columns={"total_created": "Created"})
+
+            styled_pk_trend = (
+                pk_trend_display.style
+                .apply(_pk_color_d0, subset=["D0 %"])
+                .apply(_pk_color_d2, subset=["D2+ %"])
+                .apply(_color_volume_vec, subset=["Created"])
+                .format({
+                    "Created": "{:,.0f}",
+                    "D0 %": "{:.1f}%",
+                    "D1 %": "{:.1f}%",
+                    "D2+ %": "{:.1f}%",
+                })
+            )
+            st.dataframe(styled_pk_trend, use_container_width=True, height=500, hide_index=True)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
